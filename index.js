@@ -1,66 +1,90 @@
-// index.js
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch";
+export default async function handler(req, res) {
+  const BOT_TOKEN = process.env.BOT_TOKEN;
+  const { pathname, searchParams } = new URL(req.url, `http://${req.headers.host}`);
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-const POR_PAGINA = 25;
-const botToken = process.env.BOT_TOKEN;
-
-if (!botToken) {
-  console.error("BOT_TOKEN não configurado no Vercel");
-}
-
-// Listar canais de texto com paginação
-app.get("/canais", async (req, res) => {
-  const guildId = req.query.guildID;
-  const pagina = Number(req.query.pagina || 1);
-
-  if (!guildId) {
-    return res.status(400).json({ error: "Faltando guildID" });
+  if (!BOT_TOKEN) {
+    return res.status(500).json({ error: "BOT_TOKEN não configurado" });
   }
 
-  try {
-    const discordRes = await fetch(
-      `https://discord.com/api/v10/guilds/${guildId}/channels`,
-      {
-        headers: {
-          Authorization: `Bot ${botToken}`
-        }
-      }
-    );
+  // ===== ROTA RAIZ =====
+  if (pathname === "/") {
+    return res.json({ status: "API online" });
+  }
 
-    const allChannels = await discordRes.json();
+  // ===== LISTAR CANAIS COM PAGINAÇÃO =====
+  if (pathname === "/canais") {
+    const guildID = searchParams.get("guildID");
+    const pagina = Number(searchParams.get("pagina") || 1);
+    const porPagina = 25;
 
-    if (!Array.isArray(allChannels)) {
-      return res.status(500).json({
-        error: "Erro ao buscar canais do Discord",
-        discord: allChannels
-      });
+    if (!guildID) {
+      return res.status(400).json({ error: "Falta guildID" });
     }
 
-    const textChannels = allChannels.filter(c => c.type === 0);
+    try {
+      const r = await fetch(`https://discord.com/api/v10/guilds/${guildID}/channels`, {
+        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+      });
 
-    const inicio = (pagina - 1) * POR_PAGINA;
-    const fim = inicio + POR_PAGINA;
+      const dados = await r.json();
 
-    const canais = textChannels.slice(inicio, fim).map(c => ({
-      id: c.id,
-      nome: c.name
-    }));
+      const textos = dados.filter(c => c.type === 0);
 
-    res.json({
-      pagina,
-      total_paginas: Math.ceil(textChannels.length / POR_PAGINA),
-      canais
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+      const totalPaginas = Math.ceil(textos.length / porPagina);
+      const inicio = (pagina - 1) * porPagina;
+      const fim = inicio + porPagina;
+
+      const paginaCanais = textos.slice(inicio, fim).map(c => ({
+        id: c.id,
+        nome: c.name
+      }));
+
+      return res.json({
+        pagina,
+        total_paginas: totalPaginas,
+        quantidade: paginaCanais.length,
+        canais: paginaCanais
+      });
+
+    } catch (e) {
+      return res.status(500).json({ error: "Erro ao buscar canais" });
+    }
   }
-});
 
-// Importante para Vercel:
-export default app;
+  // ===== BUSCAR CANAL PELO NOME =====
+  if (pathname === "/buscar-canal") {
+    const guildID = searchParams.get("guildID");
+    const nome = searchParams.get("nome");
+
+    if (!guildID || !nome) {
+      return res.status(400).json({ error: "Falta guildID ou nome" });
+    }
+
+    try {
+      const r = await fetch(`https://discord.com/api/v10/guilds/${guildID}/channels`, {
+        headers: { Authorization: `Bot ${BOT_TOKEN}` }
+      });
+
+      const dados = await r.json();
+
+      const filtrados = dados
+        .filter(c => c.type === 0)
+        .filter(c => c.name.toLowerCase().includes(nome.toLowerCase()))
+        .map(c => ({
+          id: c.id,
+          nome: c.name
+        }));
+
+      return res.json({
+        total: filtrados.length,
+        canais: filtrados
+      });
+
+    } catch (e) {
+      return res.status(500).json({ error: "Erro ao buscar canal" });
+    }
+  }
+
+  // ===== ROTA NÃO EXISTE =====
+  return res.status(404).json({ error: "Rota não encontrada" });
+}
